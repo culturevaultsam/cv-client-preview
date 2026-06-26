@@ -98,6 +98,15 @@ let THREE, scene, camera, renderer, vault, wheel, doorPivot, bolts=[], innerLigh
 let orb, orbMats=[], scanRing;
 let state = 'idle', tStart = 0, clock0 = 0, rafId;
 let pendingIframeURL = null;
+let restZ = 6.6, orbBase = 0.72;
+
+// the vault circle is wide; on portrait/narrow screens pull the camera back and
+// shrink the orb so the whole door fits and the wireframe doesn't sprawl to the edges.
+function fit(){
+  const a = innerWidth / innerHeight;
+  restZ   = a < 0.72 ? 6.6 + (0.72 - a) * 6.0 : 6.6;
+  orbBase = a < 0.72 ? 0.60 : 0.72;
+}
 
 async function init(){
   THREE = await import('three');
@@ -115,8 +124,9 @@ async function init(){
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
 
+  fit();
   camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
-  camera.position.set(0, 0, 6.6);
+  camera.position.set(0, 0, restZ);
 
   // lights — clean white key + cool rim + red kicker
   scene.add(new THREE.AmbientLight(0xffffff, 0.45));
@@ -197,7 +207,7 @@ async function init(){
   // ---- floating wireframe orb ("dragon egg"), moved onto the vault face ----
   orb = new THREE.Group();
   orb.position.set(0, 0, 1.45);     // hovering in front of the door
-  orb.scale.setScalar(0.72);
+  orb.scale.setScalar(orbBase);
   const wireMat  = new THREE.LineBasicMaterial({ color:0xff2238, transparent:true, opacity:0.9 });
   orb.add(new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(1.7,1)), wireMat));
   const oInnerMat = new THREE.MeshBasicMaterial({ color:0xff2238, transparent:true, opacity:0.10 });
@@ -219,8 +229,10 @@ function placeBolt(b, r){
   b.rotation.z = b.userData.angle;
 }
 function onResize(){
+  fit();
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  if(state === 'idle'){ camera.position.z = restZ; camera.position.x = 0; }
 }
 
 function animate(){
@@ -234,14 +246,14 @@ function animate(){
     wheel.rotation.z = Math.sin(t*0.6)*0.04;
     scanRing.rotation.z = t*0.25;
     orb.rotation.y = t*0.3; orb.rotation.x = t*0.18;
-    orb.scale.setScalar(0.72*(1 + Math.sin(t*1.4)*0.03));
+    orb.scale.setScalar(orbBase*(1 + Math.sin(t*1.4)*0.03));
   } else if(state === 'unlocking'){
     const p = clamp01((now - tStart)/2000); // 2s
     // orb spins up and dissolves first (the seal breaking)
     const of = 1 - easeInOut(clamp01(p/0.42));
     orbMats.forEach(([m,o]) => m.opacity = o*of);
     orb.rotation.y += 0.16; orb.rotation.x += 0.05;
-    orb.scale.setScalar(0.72*(1 + (1-of)*0.7));
+    orb.scale.setScalar(orbBase*(1 + (1-of)*0.7));
     if(of <= 0) orb.visible = false;
     scanRing.rotation.z += 0.05; scanRing.material.opacity = 0.55*of;
     const wp = easeOut(clamp01(p/0.4));                 // wheel spins
@@ -253,7 +265,7 @@ function animate(){
     const cp = easeInOut(clamp01((p-0.5)/0.5));          // light swell + camera dolly
     innerLight.intensity = cp * 10;
     vault.userData.inner.material.color.setRGB(0.03+cp*0.97, 0.03+cp*0.97, 0.03+cp*0.97);
-    camera.position.z = 6.6 - cp*5.6;
+    camera.position.z = restZ - cp*(restZ - 1.0);
     camera.position.x = cp*0.35;
     vault.rotation.set(0,0,0);
     $('flash').style.opacity = String(clamp01((p-0.8)/0.2)); // flash fills screen
@@ -270,15 +282,32 @@ function startUnlock(){
   $('brand').style.opacity = '0';
 }
 
-// The standalone export pins a fixed #__bundler_err / #__bundler_loading debug
-// badge when any embedded chunk fails to decode. Same-origin (blob:) so we can
-// suppress that dev overlay for the client; CSS matches even if added async.
-function hideBundlerDebug(f){
+// Same-origin (blob:) so we can enhance the revealed export for the client:
+//  - suppress the #__bundler_err / #__bundler_loading dev overlay it pins on decode errors
+//  - add the missing viewport meta + a mobile stylesheet (the export ships none).
+// Selectors are tag/semantic-class/inline-style based (no hashed classes), so they
+// survive re-exports. CSS rules apply even to nodes the bundler adds asynchronously.
+const REVEAL_CSS = `#__bundler_err,#__bundler_loading{display:none!important}
+@media (max-width:700px){
+  nav{flex-wrap:wrap!important;height:auto!important;row-gap:3px!important;column-gap:10px!important;padding:8px 12px!important;justify-content:center!important;}
+  nav>*{flex-wrap:wrap!important;justify-content:center!important;column-gap:10px!important;row-gap:2px!important;min-width:0!important;}
+  nav a{font-size:10px!important;letter-spacing:.5px!important;}
+  h1.glitch{font-size:clamp(44px,15vw,92px)!important;}
+  [style*="vertical-rl"]{display:none!important;}
+  canvas{opacity:.22!important;}
+  [style*="grid-template-columns"]{grid-template-columns:1fr!important;}
+}`;
+function enhanceRevealed(f){
   const inject = () => { try{
     const doc = f.contentDocument; if(!doc) return;
-    if(!doc.getElementById('__cv_hide')){
-      const s = doc.createElement('style'); s.id = '__cv_hide';
-      s.textContent = '#__bundler_err,#__bundler_loading{display:none!important}';
+    if(doc.head && !doc.querySelector('meta[name="viewport"]')){
+      const m = doc.createElement('meta'); m.name = 'viewport';
+      m.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
+      doc.head.appendChild(m);
+    }
+    if(!doc.getElementById('__cv_enh')){
+      const s = doc.createElement('style'); s.id = '__cv_enh';
+      s.textContent = REVEAL_CSS;
       (doc.head || doc.documentElement).appendChild(s);
     }
     doc.querySelectorAll('#__bundler_err').forEach(n => n.remove());
@@ -295,7 +324,7 @@ function reveal(){
   // delegate media permissions down to nested embeds (YouTube needs encrypted-media)
   f.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write; accelerometer; gyroscope';
   f.setAttribute('allowfullscreen', '');
-  hideBundlerDebug(f);
+  enhanceRevealed(f);
   document.body.appendChild(f);
   $('scene').style.display = 'none';
   $('scan').style.display = 'none';
@@ -337,7 +366,7 @@ init().catch(err => {
       const f=document.createElement('iframe'); f.id='frame'; f.style.zIndex=9; f.src=url;
       f.allow='autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write; accelerometer; gyroscope';
       f.setAttribute('allowfullscreen','');
-      hideBundlerDebug(f);
+      enhanceRevealed(f);
       document.body.appendChild(f);
     }catch(_){ go.disabled=false; go.textContent='Enter'; $('err').textContent='Incorrect code.'; }
   };
