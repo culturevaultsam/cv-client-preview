@@ -316,12 +316,30 @@ function enhanceRevealed(f){
     // wiped — use event delegation on the document + a MutationObserver to stay attached.
     const W = f.contentWindow;
     if(W && W.matchMedia('(max-width:700px)').matches){
+      // iOS Safari can't play the bundle's WebM clips, so swap each episode card's <video>
+      // to an H.264 MP4 hosted alongside this gate (E01, E10 in DOM order).
+      const CLIP_BASE = location.href.replace(/[^/]*$/, '') + 'clips/';
+      const MP4 = ['ep01.mp4', 'ep10.mp4'];
       const relabel = () => {
-        doc.querySelectorAll('video').forEach(v => { v.setAttribute('playsinline',''); v.muted = true; v.loop = true; });
+        const seen = new Set(); let idx = 0;
         doc.querySelectorAll('div').forEach(el => {
-          if(el.children.length === 0 && /^\s*▶\s*HOVER\s*$/i.test(el.textContent)){
+          if(el.children.length !== 0) return;
+          const isHover = /^\s*▶\s*HOVER\s*$/i.test(el.textContent);
+          if(!isHover && !/CLICK TO RUN|■\s*STOP/i.test(el.textContent)) return;
+          if(isHover){
             el.textContent = '▶ CLICK TO RUN';
             el.style.cssText += ';font-size:11px;padding:6px 11px;cursor:pointer;';
+          }
+          let h = el.parentElement, n = 0;
+          while(h && !h.querySelector('video') && n < 6){ h = h.parentElement; n++; }
+          const v = h && h.querySelector('video');
+          if(v && !seen.has(v)){
+            seen.add(v);
+            v.setAttribute('playsinline',''); v.muted = true; v.loop = true;
+            if(v.dataset.cvMp4 !== '1' && MP4[idx]){
+              v.dataset.cvMp4 = '1'; v.src = CLIP_BASE + MP4[idx]; v.load();
+            }
+            idx++;
           }
         });
       };
