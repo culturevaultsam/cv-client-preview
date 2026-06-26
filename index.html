@@ -292,6 +292,9 @@ function reveal(){
   state = 'open';
   const f = document.createElement('iframe');
   f.id = 'frame'; f.src = pendingIframeURL;
+  // delegate media permissions down to nested embeds (YouTube needs encrypted-media)
+  f.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write; accelerometer; gyroscope';
+  f.setAttribute('allowfullscreen', '');
   hideBundlerDebug(f);
   document.body.appendChild(f);
   $('scene').style.display = 'none';
@@ -332,6 +335,8 @@ init().catch(err => {
       const plain = await decrypt($('pw').value);
       const url = URL.createObjectURL(new Blob([plain],{type:'text/html'}));
       const f=document.createElement('iframe'); f.id='frame'; f.style.zIndex=9; f.src=url;
+      f.allow='autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-write; accelerometer; gyroscope';
+      f.setAttribute('allowfullscreen','');
       hideBundlerDebug(f);
       document.body.appendChild(f);
     }catch(_){ go.disabled=false; go.textContent='Enter'; $('err').textContent='Incorrect code.'; }
